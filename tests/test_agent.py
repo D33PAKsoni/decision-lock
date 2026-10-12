@@ -123,9 +123,9 @@ def test_errors_do_not_expose_exception_payload_in_logs(store, caplog, capsys):
 def test_loop_budget_stops_a_repeating_model(store):
     model = ScriptedModel([("get_current_time", {})] * 4)
     agent = DecisionAgent(replace(Settings(), max_model_calls=2), store, lambda _: model)
-    with pytest.raises(AgentError, match="could not finish"):
+    with pytest.raises(AgentError, match="retry"):
         agent.decide("What tonight?")
-    assert len(model.requests) == 2
+    assert len(model.requests) == 1  # One call reserved for native finalization.
 
 
 def test_timeout_is_friendly_and_does_not_hang(store):
@@ -175,3 +175,87 @@ def test_context_and_review_use_non_recommendation_schemas(store):
         "Study or build?", phase="review"
     )
     assert result.reply.kind == "context"
+
+
+class NativeCompletionModel(ScriptedModel):
+    def __init__(self, actions, final_reply):
+        super().__init__(actions)
+        self.final_reply = final_reply
+        self.native_requests = []
+
+    async def structured_output(self, output_model, prompt, **kwargs):
+        self.native_requests.append((output_model, prompt))
+        yield {"output": output_model.model_validate(self.final_reply)}
+
+
+def test_tool_limit_finishes_with_native_schema_and_actual_results(store, reply, caplog):
+    model = NativeCompletionModel([("get_current_time", {})], reply.model_dump())
+    agent = DecisionAgent(replace(Settings(), max_model_calls=2), store, lambda _: model)
+    result = agent.decide(
+        "Study or build?", reviewed_context="Exam tomorrow; 30 minutes; prioritize passing."
+    )
+    assert result.reply.kind == "recommendation"
+    assert len(model.requests) == 1 and len(model.native_requests) == 1
+    schema, messages = model.native_requests[0]
+    assert schema.__name__ == "FinalReply"
+    data = json.loads(messages[0]["content"][0]["text"])
+    assert data["request"]["reviewed_context"].startswith("Exam tomorrow")
+    assert data["executed_tools"][0]["name"] == "get_current_time"
+    assert result.tools[0].result == data["executed_tools"][0]["result"]
+    assert "stop=limit_turns" in caplog.text
+    assert "Exam tomorrow" not in caplog.text
+    assert store.recent() == []
+
+
+def test_invalid_structured_tool_output_recovers_without_fake_verdict(store, reply):
+    invalid = {"kind": "recommendation", "recommendation": "Study"}
+    model = NativeCompletionModel([("FinalReply", invalid)], reply.model_dump())
+    result = DecisionAgent(replace(Settings(), max_model_calls=2), store, lambda _: model).decide(
+        "Study or build?"
+    )
+    assert result.reply.model_dump() == reply.model_dump()
+    assert len(model.native_requests) == 1
+
+
+def test_native_completion_also_preserves_context_phase(store):
+    model = NativeCompletionModel(
+        [("get_current_time", {})],
+        {"kind": "context", "context_summary": "A or B; time unknown."},
+    )
+    result = DecisionAgent(replace(Settings(), max_model_calls=2), store, lambda _: model).decide(
+        "A or B?", phase="review"
+    )
+    assert result.reply.kind == "context"
+    assert model.native_requests[0][0].__name__ == "ReviewReply"
+
+
+def test_native_completion_shares_timeout(store, reply):
+    class SlowNative(NativeCompletionModel):
+        async def structured_output(self, *args, **kwargs):
+            await asyncio.sleep(1)
+            yield {}
+
+    model = SlowNative([("get_current_time", {})], reply.model_dump())
+    agent = DecisionAgent(
+        replace(Settings(), max_model_calls=2, request_timeout_seconds=0.02), store, lambda _: model
+    )
+    with pytest.raises(AgentError, match="retry"):
+        agent.decide("A or B?")
+    assert len(model.requests) == 1
+
+
+@pytest.mark.parametrize("failure", ["tokens", "structure"])
+def test_sdk_completion_exceptions_use_one_native_attempt(store, reply, failure):
+    from strands.types.exceptions import MaxTokensReachedException, StructuredOutputException
+
+    class FailedLoop(NativeCompletionModel):
+        async def stream(self, *args, **kwargs):
+            if failure == "tokens":
+                raise MaxTokensReachedException("Token cutoff")
+            raise StructuredOutputException("No structured output")
+            yield {}
+
+    model = FailedLoop([], reply.model_dump())
+    result = DecisionAgent(Settings(), store, lambda _: model).decide("A or B?")
+    assert result.reply.kind == "recommendation"
+    assert len(model.native_requests) == 1

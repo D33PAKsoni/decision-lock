@@ -31,5 +31,5 @@ def create_model(settings: Settings):
             ),
         },
         model_id=settings.gemini_model,
-        params={"temperature": 0.2, "max_output_tokens": 2048},
+        params={"temperature": 0.2, "max_output_tokens": 4096},
     )

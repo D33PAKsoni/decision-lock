@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Callable
 
 from strands import Agent
+from strands.types.exceptions import MaxTokensReachedException, StructuredOutputException
 
 from .config import ConfigurationError, Settings
 from .models import ContextReply, FinalReply, ReviewReply, TurnResult
@@ -91,20 +92,67 @@ class DecisionAgent:
                 retry_strategy=None,
             )
 
-            async def invoke():
-                return await asyncio.wait_for(
-                    agent.invoke_async(
+            async def complete():
+                stop_reason = "missing_output"
+                try:
+                    result = await agent.invoke_async(
                         request,
                         structured_output_model=schema,
-                        limits={"turns": self.settings.max_model_calls, "output_tokens": 6000},
-                    ),
-                    timeout=self.settings.request_timeout_seconds,
+                        structured_output_prompt=(
+                            f"Finish this {phase} stage by calling {schema.__name__}. "
+                            "Supply short values that satisfy its schema. For a recommendation, "
+                            "include one chosen option, 2–4 reasons and one concrete next_action. "
+                            "Do not call another decision tool now."
+                        ),
+                        # Reserve one model call for a native JSON completion if necessary.
+                        limits={"turns": self.settings.max_model_calls - 1, "output_tokens": 8192},
+                    )
+                    if result.structured_output is not None:
+                        return schema.model_validate(result.structured_output.model_dump())
+                    stop_reason = str(result.stop_reason)
+                    if stop_reason not in {"limit_turns", "limit_output_tokens", "end_turn"}:
+                        raise AgentError(
+                            "Gemini stopped without a complete response. "
+                            "Your context is preserved. "
+                            "Please retry or check the model settings."
+                        )
+                except (MaxTokensReachedException, StructuredOutputException) as exc:
+                    stop_reason = type(exc).__name__
+                LOGGER.warning("Completing model response (phase=%s, stop=%s).", phase, stop_reason)
+                completion = json.dumps(
+                    {
+                        "request": json.loads(request),
+                        "executed_tools": [item.model_dump() for item in observations],
+                        "instruction": (
+                            "Finish the requested phase now using only the confirmed context and "
+                            "actual tool results. Do not request more tools. Missing facts remain "
+                            "unknown. Return a concise response matching the supplied schema. "
+                            "For recommend, give a recommendation with 2–4 reasons "
+                            "and a next_action when the context supports it; otherwise "
+                            "explain what prevents a choice."
+                        ),
+                    }
+                )
+                # Adapter-level structured_output uses Gemini's native response schema.
+                # No deprecated Agent.structured_output API, invented verdict or unbounded retry.
+                messages = [{"role": "user", "content": [{"text": completion}]}]
+                async for event in model.structured_output(
+                    schema, messages, system_prompt=SYSTEM_PROMPT
+                ):
+                    if event.get("output") is not None:
+                        return schema.model_validate(event["output"].model_dump())
+                raise AgentError(
+                    "Gemini could not complete this response. Your context is preserved. "
+                    "Please retry or check the model settings."
                 )
 
-            result = asyncio.run(invoke())
-            if result.structured_output is None:
-                raise AgentError("The model could not finish a clear verdict. Please retry.")
-            reply = schema.model_validate(result.structured_output.model_dump())
+            async def invoke():
+                # Tool reasoning and native completion share one overall deadline.
+                return await asyncio.wait_for(
+                    complete(), timeout=self.settings.request_timeout_seconds
+                )
+
+            reply = asyncio.run(invoke())
         except ConfigurationError:
             raise
         except AgentError:

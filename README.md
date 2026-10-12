@@ -49,7 +49,7 @@ Public-demo history remains temporary and separate for each visitor.
 
 ## Verification
 
-101 offline tests passed; 2 opted-in live API tests skipped. Test coverage includes
+108 offline tests passed; 2 opted-in live API tests skipped. Test coverage includes
 real Strands protocol execution through fixtures, actual Gemini adapter request formatting,
 scoring/storage/feedback, input-preserving retry, Cloud session isolation, forced public
 mode and atomic process-wide request reservations. Scripted fixtures are not real model
@@ -61,3 +61,14 @@ local file storage is not guaranteed to survive restarts/disconnects. Download n
 to keep them. Permanent multi-user account history is outside this demonstration.
 
 MIT licensed. Strands is the AWS-origin tool used; no AWS infrastructure is required.
+
+## v0.3.1 — final response recovery
+
+If the Strands loop reaches its budget or fails to finish structured output, one reserved
+call uses Gemini's native JSON-schema response to complete the current phase. It receives
+the original request, reviewed context and only actual recorded tool results. It does not
+invent a local verdict or execute extra tools. Overall timeout and model-call caps remain
+bounded. Per-call output headroom is 4,096 tokens; the tool loop output cap is 8,192 tokens.
+A sanitized stop reason is logged without prompts, answers or API keys. Quota, authorization
+and safety failures are not converted into fabricated decisions. Live API testing is still
+required after deployment; automated recovery tests use SDK protocol fixtures.

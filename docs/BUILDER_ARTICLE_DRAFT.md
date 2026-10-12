@@ -83,7 +83,7 @@ lose progress just because one part of the system fails.
 
 ## What has been verified so far
 
-The automated suite has 101 passing tests and two live-Gemini tests that skip unless
+The automated suite has 108 passing tests and two live-Gemini tests that skip unless
 explicitly enabled. Tests cover weighted arithmetic, validation, persistence, feedback,
 key/provider configuration, privacy checks, timeouts and the bounded context-and-review contract.
 

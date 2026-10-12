@@ -59,7 +59,7 @@ def test_gemini_adapter_uses_supported_sdk_and_bounded_http(monkeypatch):
     assert kwargs["model_id"] == "gemini-3.5-flash-lite"
     assert kwargs["client_args"]["http_options"].timeout == 180000
     assert kwargs["client_args"]["http_options"].retry_options.attempts == 1
-    assert kwargs["params"]["max_output_tokens"] == 2048
+    assert kwargs["params"]["max_output_tokens"] == 4096
 
 
 def test_actual_gemini_adapter_formats_tool_schema(monkeypatch, store):
@@ -81,3 +81,39 @@ def test_actual_gemini_adapter_formats_tool_schema(monkeypatch, store):
         "get_recent_decisions",
     }
     assert "private-sentinel" not in str(request)
+
+
+def test_actual_adapter_native_completion_uses_json_schema(monkeypatch, reply):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from decision_lock.models import FinalReply
+
+    monkeypatch.setenv("GEMINI_API_KEY", "private-sentinel")
+    model = create_model(Settings())
+    generate = AsyncMock(return_value=SimpleNamespace(parsed=reply.model_dump()))
+    client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate)))
+    monkeypatch.setattr(model, "_get_client", lambda: client)
+
+    async def invoke():
+        return [
+            event
+            async for event in model.structured_output(
+                FinalReply,
+                [{"role": "user", "content": [{"text": "Use confirmed context."}]}],
+                system_prompt="Keep facts grounded.",
+            )
+        ]
+
+    events = asyncio.run(invoke())
+    assert events[-1]["output"].kind == "recommendation"
+    config = generate.call_args.kwargs["config"]
+    assert config["response_mime_type"] == "application/json"
+    assert config["response_schema"]["properties"]["kind"]["enum"] == [
+        "recommendation",
+        "information",
+        "refusal",
+    ]
+    assert config["max_output_tokens"] == 4096
+    assert "private-sentinel" not in str(generate.call_args)

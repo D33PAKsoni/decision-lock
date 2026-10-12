@@ -59,6 +59,10 @@ and database locking are separate steps. The saved record includes the reviewed 
 context answers. Question/review tools may use history only with explicit consent. Each
 phase uses a fresh Strands loop and consumes a public-demo request reservation.
 
+Incomplete structured output is finalized with one reserved native Gemini JSON-schema
+call using the original envelope and actual tool ledger. It stays inside the same deadline
+and max_model_calls setting. Rate/auth errors and safety stops do not trigger this recovery.
+
 score_options requires 2–5 unique options, 1–6 criteria, finite 0–10 scores and nonnegative
 weights with at least one positive value. Scores always mean better fit, not raw effort.
 Weights are scaled then normalized; math.fsum adds products. Ranking, original scores,
