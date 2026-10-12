@@ -44,7 +44,9 @@ def test_history_limits(store, limit):
 
 
 def test_non_verdict_cannot_be_saved(store):
-    question = AgentReply(kind="clarification", message="When is your exam?")
+    question = AgentReply(
+        kind="clarification", message="Context first.", questions=["When is your exam?"]
+    )
     with pytest.raises(ValueError):
         store.lock("token", "A", question, "gemini")
     assert store.recent() == []

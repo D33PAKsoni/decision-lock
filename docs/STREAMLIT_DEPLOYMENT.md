@@ -88,7 +88,7 @@ Public visitors cannot change the owner's Gemini model through the UI.
 
 ## Source checks
 
-94 offline tests passed with 2 live tests skipped during preparation. Ruff and source
+101 offline tests passed with 2 live tests skipped during preparation. Ruff and source
 secret/artifact checks passed. No real key, .env, encrypted key, personal database,
 virtual environment, cache or fabricated screenshot belongs in the deployment package.
 Repository publication, hosted launch, actual API calls and user feedback must be

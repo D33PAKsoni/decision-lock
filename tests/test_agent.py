@@ -23,11 +23,11 @@ def test_real_strands_loop_executes_tool_and_reads_result(store, reply):
                     "weights": {"fit": 1},
                 },
             ),
-            ("AgentReply", reply.model_dump()),
+            ("FinalReply", reply.model_dump()),
         ]
     )
     result = DecisionAgent(Settings(), store, lambda _: model).decide("Study or build?")
-    assert result.reply == reply
+    assert result.reply.model_dump() == reply.model_dump()
     assert result.tools[0].name == "score_options"
     assert result.tools[0].result["ranked_options"][0]["weighted_score"] == 9
     tool_results = [
@@ -57,7 +57,7 @@ def test_history_tool_enforces_permission_even_if_model_calls_it(store, reply):
         [
             ("get_recent_decisions", {}),
             (
-                "AgentReply",
+                "FinalReply",
                 {"kind": "information", "message": "Enable history to recall decisions."},
             ),
         ]
@@ -72,7 +72,7 @@ def test_history_permission_enables_recall(store, reply):
     model = ScriptedModel(
         [
             ("get_recent_decisions", {"limit": 1}),
-            ("AgentReply", {"kind": "information", "message": "You locked a study session."}),
+            ("FinalReply", {"kind": "information", "message": "You locked a study session."}),
         ]
     )
     result = DecisionAgent(Settings(), store, lambda _: model).decide(
@@ -86,10 +86,17 @@ def test_tool_missing_data_reaches_model_as_structured_result(store):
     model = ScriptedModel(
         [
             ("score_options", {"options": [{"name": "A"}, {"name": "B"}], "weights": {"fit": 1}}),
-            ("AgentReply", {"kind": "clarification", "message": "How well does each option fit?"}),
+            (
+                "ContextReply",
+                {
+                    "kind": "clarification",
+                    "message": "A little context.",
+                    "questions": ["How well does each option fit?"],
+                },
+            ),
         ]
     )
-    result = DecisionAgent(Settings(), store, lambda _: model).decide("A or B?")
+    result = DecisionAgent(Settings(), store, lambda _: model).decide("A or B?", phase="gather")
     assert result.tools[0].result["status"] == "needs_clarification"
     assert "scores for A" in json.dumps(model.requests[1])
 
@@ -148,3 +155,23 @@ def test_gemini_api_errors_are_sanitized(store, caplog, code, expected):
         DecisionAgent(Settings(), store, fail).decide("A or B?")
     assert "private-api-key-sentinel" not in str(caught.value)
     assert "private-api-key-sentinel" not in caplog.text
+
+
+def test_context_and_review_use_non_recommendation_schemas(store):
+    questions = {
+        "kind": "clarification",
+        "message": "Before comparing.",
+        "questions": ["When is the exam?", "How much time?"],
+    }
+    model = ScriptedModel([("ContextReply", questions)])
+    result = DecisionAgent(Settings(), store, lambda _: model).decide(
+        "Study or build?", phase="gather"
+    )
+    assert len(result.reply.questions) == 2
+    model = ScriptedModel(
+        [("ReviewReply", {"kind": "context", "context_summary": "Exam tomorrow; 30 minutes."})]
+    )
+    result = DecisionAgent(Settings(), store, lambda _: model).decide(
+        "Study or build?", phase="review"
+    )
+    assert result.reply.kind == "context"

@@ -9,7 +9,7 @@ from typing import Callable
 from strands import Agent
 
 from .config import ConfigurationError, Settings
-from .models import AgentReply, FinalReply, TurnResult
+from .models import ContextReply, FinalReply, ReviewReply, TurnResult
 from .prompts import SYSTEM_PROMPT
 from .providers import create_model
 from .storage import DecisionStore
@@ -48,6 +48,10 @@ class DecisionAgent:
         clarification: str = "",
         answer: str = "",
         allow_history: bool = False,
+        phase: str = "recommend",
+        context: list[dict[str, str]] | None = None,
+        reviewed_context: str = "",
+        questions_remaining: int = 4,
     ) -> TurnResult:
         if not problem.strip() or len(problem) > 4000 or len(answer) > 4000:
             raise AgentError(
@@ -56,13 +60,25 @@ class DecisionAgent:
         quiet_dependency_logs()
         started = perf_counter()
         observations = []
-        schema = FinalReply if clarification else AgentReply
+        if phase not in {"gather", "review", "recommend"}:
+            raise AgentError("Unknown decision stage.")
+        if len(reviewed_context) > 4000:
+            raise AgentError("Keep the context summary under 4,000 characters.")
+        schema = (
+            (ContextReply if questions_remaining > 0 else ReviewReply)
+            if phase == "gather"
+            else (ReviewReply if phase == "review" else FinalReply)
+        )
         request = json.dumps(
             {
                 "decision": problem,
                 "clarification_already_asked": clarification,
                 "answer": answer,
                 "allow_history": allow_history,
+                "phase": phase,
+                "context_answers": context or [],
+                "reviewed_context": reviewed_context,
+                "questions_remaining": questions_remaining,
             }
         )
         try:

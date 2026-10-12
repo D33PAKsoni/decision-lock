@@ -16,7 +16,7 @@ A useful answer needs to account for the exam date, available time and what matt
 the person asking. It should also leave them with something they can actually do next.
 
 I wanted the experience to end in a clear action. Decision Lock accepts a natural-language
-choice, can ask one useful clarification, and presents one recommendation, a few short
+choice, asks up to four relevant context questions, offers an editable context review, and presents one recommendation, a few short
 reasons and one next move. The user then has an explicit Lock This Decision button.
 The agent recommends; the person makes the commitment.
 
@@ -83,9 +83,9 @@ lose progress just because one part of the system fails.
 
 ## What has been verified so far
 
-The automated suite has 94 passing tests and two live-Gemini tests that skip unless
+The automated suite has 101 passing tests and two live-Gemini tests that skip unless
 explicitly enabled. Tests cover weighted arithmetic, validation, persistence, feedback,
-key/provider configuration, privacy checks, timeouts and the one-clarification contract.
+key/provider configuration, privacy checks, timeouts and the bounded context-and-review contract.
 
 A scripted protocol fixture exercises the actual installed Strands loop: it requests
 a tool, the real Python tool executes, and the result returns to the fixture before

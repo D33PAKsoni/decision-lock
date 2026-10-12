@@ -20,7 +20,7 @@ flowchart TD
 - config.py: Gemini model, timezone, SQLite path, turn/timeout bounds; no API key field.
 - providers.py: private key resolution and current strands.models.gemini.GeminiModel.
 - agent.py: actual Strands loop, validated response schema and sanitized errors.
-- controller.py: one choice, one structured clarification, retry preservation, explicit locks.
+- controller.py: bounded context questions, editable review, retry preservation, explicit locks.
 - models.py: validated AgentReply and follow-up FinalReply, tool ledger and turn response.
 - scoring.py: pure deterministic arithmetic/validation; tools.py: bound read-only tools.
 - storage.py: parameterized SQLite writes, idempotency token, upserted feedback/history.
@@ -39,16 +39,25 @@ The provider label records the actual configured Gemini model with each turn/loc
 ## Agent behavior and tools
 
 Each attempt creates a fresh Strands Agent with tools and the concise system instructions.
-The model chooses whether/which tools to call. The request envelope contains the choice,
-prior clarification, answer and explicit history permission; no fixed tool pipeline.
+The model chooses whether/which tools to call. The request envelope carries the phase,
+choice, context answers, remaining question budget, reviewed summary and history permission.
 
-AgentReply may be recommendation, clarification, information or refusal. A recommendation
-needs a verdict, 2–4 reasons and one next action. After one structured clarification,
-FinalReply excludes another clarification. The controller also rejects repeated structured
-questions. This does not semantically classify every question-shaped sentence.
+ContextReply permits clarification, context summary, information or refusal; it excludes
+recommendations. ReviewReply also excludes questions. FinalReply permits recommendations,
+information or refusal, excluding questions and context summaries. A recommendation needs
+one chosen option, 2–4 reasons and one next action.
 
-Retries retain input and build a fresh agent loop. Successful replies remain unsaved until
-Lock This Decision is clicked. No agent-callable save tool exists.
+The controller owns the question count (maximum four total) and rejects repeated question
+strings, budget overflows and premature recommendations. Semantic repetition or inaccurate
+summaries still require user review. Blank answers are marked Not provided. Users may skip
+remaining questions, then edit and confirm the summary before comparison. Corrected context
+takes precedence over original answers in the prompt. Locking requires confirmed context and
+an actual recommendation. There is no agent-callable save tool.
+
+Retries retain answers and the pending phase without appending duplicates. Context approval
+and database locking are separate steps. The saved record includes the reviewed summary and
+context answers. Question/review tools may use history only with explicit consent. Each
+phase uses a fresh Strands loop and consumes a public-demo request reservation.
 
 score_options requires 2–5 unique options, 1–6 criteria, finite 0–10 scores and nonnegative
 weights with at least one positive value. Scores always mean better fit, not raw effort.

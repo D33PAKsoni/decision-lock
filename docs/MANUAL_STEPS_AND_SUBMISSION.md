@@ -32,13 +32,13 @@ assertions, not evidence that a person liked the result. Record only real observ
 | 4 | Low-cost notebook now vs wait; old one works | Practical choice without certainty claims |
 | 5 | argparse vs a framework for a small Python CLI | Assumptions disclosed |
 | 6 | Blocking bug vs colors, 30 minutes | Explicit priority and limit respected |
-| 7 | Study or build, no deadlines given | At most one structured clarification |
-| 8 | I don’t know what to do tonight | Useful single clarification or honest information |
+| 7 | Study or build, no deadlines given | 2–4 relevant questions, editable review, then comparison |
+| 8 | I don’t know what to do tonight | Relevant context questions or honest information |
 | 9 | Temporarily disconnect internet or use a deliberately invalid key | Friendly failure, retained input, retry; restore key afterward |
 | 10 | Lock/feedback, new choice, recall prior decision | History permission and persistence |
 
 Also run the explicit numeric scoring prompt from README. Expected arithmetic is 8.3
-and 6.1. Log scenario, provider/model, clarification count, tools actually executed,
+and 6.1. Log scenario, provider/model, question count and confirmed context, tools actually executed,
 verdict, next action, lock/feedback result and any problem. At least eight realistic
 scenarios need actual execution before claiming completed scenario testing.
 

@@ -53,7 +53,7 @@ if "settings" not in st.session_state:
         st.error(str(exc))
         st.info("Check your environment settings, then refresh. Start with .env.example.")
         st.stop()
-if "decision" not in st.session_state:
+if "decision" not in st.session_state or not hasattr(st.session_state.decision, "stage"):
     st.session_state.decision = DecisionSession()
 
 settings: Settings = st.session_state.settings
@@ -72,17 +72,23 @@ def new_decision():
     st.session_state.allow_history = False
 
 
-def run_turn(text: str | None = None):
+def run_turn(text: str | None = None, *, action: str = "start", answers=None, skip=False):
     if settings.app_mode == "public_demo":
         if not demo_budget(settings.demo_max_requests).reserve():
             session.error = "This demo has reached its request limit. Please try again later."
             st.rerun()
     try:
-        with st.spinner("Weighing the options. Let’s find your next move…"):
+        with st.spinner("Understanding your priorities and finding your next move…"):
+            history = st.session_state.get("allow_history", False)
             if text is None:
-                session.retry(agent, st.session_state.get("allow_history", False))
+                if action == "answers":
+                    session.answer_questions(answers, agent, history, skip=skip)
+                else:
+                    session.retry(agent, history)
+            elif action == "confirm":
+                session.confirm_context(text, agent, history)
             else:
-                session.submit(text, agent, st.session_state.get("allow_history", False))
+                session.submit(text, agent, history)
     except (AgentError, ConfigurationError) as exc:
         session.error = str(exc)
     st.rerun()
@@ -142,9 +148,10 @@ with st.sidebar:
 st.html('<div class="eyebrow">LESS OVERTHINKING. MORE DOING.</div>')
 st.title("Decision Lock")
 st.markdown(
-    "Tell me the small decision you’re overthinking. I’ll help you choose and turn it "
-    "into **one next action**."
+    "Tell me the small decision you’re overthinking. We’ll establish what matters, "
+    "review the context, then choose **one next action**."
 )
+st.caption("1 · Describe → 2 · Add context → 3 · Review → 4 · Compare & lock")
 st.caption(settings.provider_label)
 if settings.app_mode == "public_demo":
     st.caption(
@@ -175,12 +182,11 @@ if not session.problem:
 else:
     with st.chat_message("user"):
         st.write(session.problem)
-    if session.clarification:
-        with st.chat_message("assistant"):
-            st.write(session.clarification)
-        if session.answer:
-            with st.chat_message("user"):
-                st.write(session.answer)
+    if session.context:
+        with st.expander("Your context answers"):
+            for entry in session.context:
+                st.markdown("**" + entry["question"] + "**")
+                st.write(entry["answer"])
 
 if session.error:
     st.error(session.error)
@@ -190,7 +196,44 @@ if session.error:
 
 if session.result:
     reply = session.result.reply
+    if session.stage == "questions" and not session.error:
+        with st.container(border=True):
+            st.subheader("Let’s understand your choice")
+            st.write(reply.message)
+            st.caption(
+                "Up to four questions in total. Brief answers are enough; blanks stay unknown."
+            )
+            with st.form(f"context_questions_{session.lock_token}_{session.revision}"):
+                answers = [
+                    st.text_input(
+                        question,
+                        max_chars=1000,
+                        key=f"answer_{session.lock_token}_{session.revision}_{i}",
+                    )
+                    for i, question in enumerate(session.questions)
+                ]
+                continue_context = st.form_submit_button(
+                    "Continue with these answers", type="primary"
+                )
+                skip_context = st.form_submit_button("That’s enough — review now")
+            if continue_context or skip_context:
+                run_turn(action="answers", answers=answers, skip=skip_context)
+    elif session.stage == "review":
+        with st.container(border=True):
+            st.subheader("Here’s what I understood")
+            st.caption("Correct anything missing or inaccurate before I compare the options.")
+            with st.form(f"context_review_{session.lock_token}_{session.revision}"):
+                summary = st.text_area(
+                    "Your decision context", session.reviewed_context, height=220, max_chars=4000
+                )
+                confirmed = st.form_submit_button(
+                    "Confirm context & compare", type="primary", disabled=bool(session.error)
+                )
+            if confirmed:
+                run_turn(summary, action="confirm")
     if reply.kind == "recommendation":
+        with st.expander("Context you confirmed"):
+            st.write(session.reviewed_context)
         with st.container(border=True):
             if session.locked_id is None:
                 st.caption("THE VERDICT")
@@ -238,7 +281,7 @@ if session.result:
                     st.caption("Thanks — saved. You can change your feedback anytime.")
             st.download_button(
                 "Copy as a text file",
-                data=f"{reply.recommendation}\n\n{reply.next_action}\n",
+                data=f"{reply.recommendation}\n\n{reply.next_action}\n\nContext:\n{session.reviewed_context}\n",
                 file_name="next-move.txt",
                 mime="text/plain",
                 use_container_width=True,
@@ -264,24 +307,22 @@ if session.result:
         with st.chat_message("assistant"):
             st.write(reply.message)
 
-finished = session.result is not None and session.result.reply.kind != "clarification"
-if not finished:
+if session.stage != "finished":
     st.checkbox(
         "Use my locked decisions for this choice",
         key="allow_history",
         help="Allows the agent to read your local history. Retrieved history "
         "is sent to Google along with your request. Leave off for a fresh decision.",
     )
-    if session.clarification and not session.answer:
-        st.caption("One quick answer, then we’ll choose.")
+if not session.problem:
     text = st.chat_input(
-        "Answer the question…" if session.clarification else "What are you deciding?",
+        "What are you deciding?",
         max_chars=4000,
         disabled=bool(session.error),
     )
     if text:
         run_turn(text)
-else:
+elif session.stage == "finished":
     st.button("Make another decision", on_click=new_decision, use_container_width=True)
 
 st.caption("The agent recommends. You decide. · Gemini API · Built with Strands")
