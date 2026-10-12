@@ -1,0 +1,6 @@
+# Streamlit Community Cloud uses this runtime dependency file.
+strands-agents[gemini]==1.59.0
+streamlit==1.65.0
+python-dotenv==1.2.4
+tzdata==2026.5
+httpx[socks]>=0.28.1,<1
